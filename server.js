@@ -1,21 +1,39 @@
 const http = require('http');
 const WebSocket = require('ws');
+const fs = require('fs');
+const path = require('path');
 
-const server = http.createServer();
+// 读取平台分配端口，关键！不能固定8080
 const PORT = process.env.PORT || 8080;
+const server = http.createServer();
 
-// HTTP健康检测接口 /ping 用于保活，防止Render误杀
+// HTTP服务：访问根路径直接返回前端index.html
 server.on('request', (req, res) => {
+    // 健康检测接口 /ping
     if (req.url === '/ping') {
         res.writeHead(200);
         res.end('pong');
+        return;
+    }
+    // 返回聊天室页面
+    if (req.url === '/' || req.url.startsWith('/?room=')) {
+        const htmlPath = path.join(__dirname, 'index.html');
+        fs.readFile(htmlPath, (err, data) => {
+            if (err) {
+                res.writeHead(404);
+                res.end('html not found');
+                return;
+            }
+            res.writeHead(200, { 'Content-Type': 'text/html;charset=utf-8' });
+            res.end(data);
+        });
         return;
     }
     res.writeHead(404);
     res.end();
 });
 
-// WebSocket服务挂载至http服务
+// WebSocket挂载
 const wss = new WebSocket.Server({ noServer: true });
 server.on('upgrade', (request, socket, head) => {
     wss.handleUpgrade(request, socket, head, (ws) => {
@@ -23,10 +41,8 @@ server.on('upgrade', (request, socket, head) => {
     });
 });
 
-// 房间容器 roomId -> {users:连接集合, messages:消息数组}
+// 房间内存容器
 const rooms = {};
-
-// 同房间广播
 function broadcast(roomId, data, excludeWs = null) {
     const room = rooms[roomId];
     if (!room) return;
@@ -53,13 +69,8 @@ wss.on('connection', (ws) => {
                     }
                     const room = rooms[currentRoomId];
                     room.users.add(ws);
-                    // 下发历史消息
                     ws.send(JSON.stringify({ type: 'history', list: room.messages }));
-                    // 系统通知
-                    const joinSysMsg = {
-                        type: 'system',
-                        text: `${userName} 进入房间`
-                    };
+                    const joinSysMsg = { type: 'system', text: `${userName} 进入房间` };
                     room.messages.push(joinSysMsg);
                     broadcast(currentRoomId, joinSysMsg);
                     break;
@@ -84,16 +95,11 @@ wss.on('connection', (ws) => {
         if (!currentRoomId || !rooms[currentRoomId]) return;
         const room = rooms[currentRoomId];
         room.users.delete(ws);
-
         if (userName) {
-            const leaveMsg = {
-                type: 'system',
-                text: `${userName} 离开房间`
-            };
+            const leaveMsg = { type: 'system', text: `${userName} 离开房间` };
             room.messages.push(leaveMsg);
             broadcast(currentRoomId, leaveMsg);
         }
-        // 房间无人，直接销毁所有数据
         if (room.users.size === 0) {
             delete rooms[currentRoomId];
         }
