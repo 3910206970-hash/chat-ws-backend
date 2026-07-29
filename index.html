@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>临时私密聊天室</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: system-ui, sans-serif;
+        }
+        body {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f7fa;
+        }
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+        }
+        .room-info {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        #roomUrl {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background: #4f46e5;
+            color: white;
+        }
+        button:hover {
+            background: #4338ca;
+        }
+        .nickname-box {
+            margin: 16px 0;
+            display: flex;
+            gap: 8px;
+        }
+        #nickInput {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 15px;
+        }
+        .chat-box {
+            height: 400px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px;
+            overflow-y: auto;
+            margin-bottom: 16px;
+            background: #fafafa;
+        }
+        .message-item {
+            margin: 8px 0;
+            line-height: 1.5;
+        }
+        .msg-name {
+            font-weight: bold;
+            color: #4f46e5;
+            margin-right: 6px;
+        }
+        .send-box {
+            display: flex;
+            gap: 8px;
+        }
+        #msgInput {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 15px;
+        }
+        .tip-text {
+            color: #6b7280;
+            font-size: 13px;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>临时私密聊天室</h2>
+        <p class="tip-text">复制页面链接分享，即可进入同一个房间聊天</p>
+        <div class="room-info">
+            <input type="text" id="roomUrl" readonly>
+            <button id="copyBtn">复制房间链接</button>
+        </div>
+        <div class="nickname-box">
+            <input type="text" id="nickInput" placeholder="输入你的昵称，确认后开始聊天">
+            <button id="setNickBtn">确认昵称</button>
+        </div>
+        <div class="chat-box" id="chatBox"></div>
+        <div class="send-box">
+            <input type="text" id="msgInput" placeholder="输入消息，回车发送" disabled>
+            <button id="sendBtn" disabled>发送</button>
+        </div>
+    </div>
+
+    <script>
+        // =========【此处修改为你的Render wss地址！！】========
+        const WS_URL = "chat-ws-backend-production-4212.up.railway.app";
+        // =====================================================
+
+        const urlParams = new URLSearchParams(window.location.search);
+        let roomId = urlParams.get('room');
+        // 生成4位数字房间ID
+        if (!roomId) {
+            roomId = String(Math.floor(Math.random() * 9000) + 1000);
+            window.location.search = `room=${roomId}`;
+        }
+        // 简单校验，防止非法room参数
+        if (!/^\d{4}$/.test(roomId)) {
+            roomId = String(Math.floor(Math.random() * 9000) + 1000);
+            window.location.search = `room=${roomId}`;
+        }
+
+        const roomUrlInput = document.getElementById('roomUrl');
+        roomUrlInput.value = window.location.href;
+
+        document.getElementById('copyBtn').addEventListener('click', async () => {
+            await navigator.clipboard.writeText(roomUrlInput.value);
+            alert('房间链接已复制！');
+        });
+
+        const chatBox = document.getElementById('chatBox');
+        const msgInput = document.getElementById('msgInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const nickInput = document.getElementById('nickInput');
+        const setNickBtn = document.getElementById('setNickBtn');
+
+        let userName = '';
+        let ws = null;
+
+        function connectWS() {
+            ws = new WebSocket(WS_URL);
+            ws.onopen = () => {
+                console.log("WebSocket连接成功");
+            };
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if(data.type === 'history'){
+                    data.list.forEach(item => renderMessage(item));
+                }else{
+                    renderMessage(data);
+                }
+            };
+            ws.onclose = () => {
+                addSystemMsg("与服务器断开连接");
+            };
+            ws.onerror = (err) => {
+                console.error("连接错误", err);
+            };
+        }
+        connectWS();
+
+        setNickBtn.addEventListener('click', setNickname);
+        nickInput.addEventListener('keydown', e => e.key === 'Enter' && setNickname());
+        function setNickname() {
+            const nick = nickInput.value.trim();
+            if (!nick) return alert('请输入有效昵称');
+            userName = nick;
+            ws.send(JSON.stringify({
+                action: "join",
+                roomId: roomId,
+                nick: userName
+            }));
+            msgInput.disabled = false;
+            sendBtn.disabled = false;
+            nickInput.disabled = true;
+            setNickBtn.disabled = true;
+        }
+
+        sendBtn.addEventListener('click', sendMessage);
+        msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage());
+        function sendMessage() {
+            const text = msgInput.value.trim();
+            if (!text || !userName) return;
+            ws.send(JSON.stringify({
+                action: "chat",
+                text: text
+            }));
+            msgInput.value = '';
+        }
+
+        function renderMessage(data) {
+            const div = document.createElement('div');
+            div.className = 'message-item';
+            if (data.type === 'system') {
+                div.innerHTML = `<span style="color:#999">[系统] ${data.text}</span>`;
+            } else {
+                div.innerHTML = `<span class="msg-name">${data.name}</span> ${data.text} <span style="font-size:12px;color:#999">${data.time}</span>`;
+            }
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function addSystemMsg(text) {
+            renderMessage({ type: 'system', text });
+        }
+    </script>
+</body>
+</html>
