@@ -1,5 +1,5 @@
 {
-  "name": "chat-ws-server",
+  "name": "chatroom",
   "version": "1.0.0",
   "dependencies": {
     "ws": "^8.17.0"
