@@ -5,95 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>临时私密聊天室</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: system-ui, sans-serif;
-        }
-        body {
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            background: #f5f7fa;
-        }
-        .container {
-            background: white;
-            border-radius: 12px;
-            padding: 24px;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-        }
-        .room-info {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            margin-bottom: 16px;
-            flex-wrap: wrap;
-        }
-        #roomUrl {
-            flex: 1;
-            padding: 8px 12px;
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
-            font-size: 14px;
-        }
-        button {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            background: #4f46e5;
-            color: white;
-        }
-        button:hover {
-            background: #4338ca;
-        }
-        .nickname-box {
-            margin: 16px 0;
-            display: flex;
-            gap: 8px;
-        }
-        #nickInput {
-            flex: 1;
-            padding: 10px;
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
-            font-size: 15px;
-        }
-        .chat-box {
-            height: 400px;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 12px;
-            overflow-y: auto;
-            margin-bottom: 16px;
-            background: #fafafa;
-        }
-        .message-item {
-            margin: 8px 0;
-            line-height: 1.5;
-        }
-        .msg-name {
-            font-weight: bold;
-            color: #4f46e5;
-            margin-right: 6px;
-        }
-        .send-box {
-            display: flex;
-            gap: 8px;
-        }
-        #msgInput {
-            flex: 1;
-            padding: 10px;
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
-            font-size: 15px;
-        }
-        .tip-text {
-            color: #6b7280;
-            font-size: 13px;
-            margin-top: 8px;
-        }
+        * {margin: 0;padding: 0;box-sizing: border-box;font-family: system-ui, sans-serif;}
+        body {max-width: 800px;margin: 0 auto;padding: 20px;background: #f5f7fa;}
+        .container {background: white;border-radius: 12px;padding: 24px;box-shadow: 0 2px 12px rgba(0,0,0,0.08);}
+        .room-info {display: flex;gap: 10px;align-items: center;margin-bottom: 16px;flex-wrap: wrap;}
+        #roomUrl {flex: 1;padding: 8px 12px;border: 1px solid #e5e7eb;border-radius: 6px;font-size: 14px;}
+        button {padding: 8px 16px;border: none;border-radius: 6px;cursor: pointer;background: #4f46e5;color: white;}
+        button:hover {background: #4338ca;}
+        .nickname-box {margin: 16px 0;display: flex;gap: 8px;}
+        #nickInput {flex: 1;padding: 10px;border: 1px solid #e5e7eb;border-radius: 6px;font-size: 15px;}
+        .chat-box {height: 400px;border: 1px solid #e5e7eb;border-radius: 8px;padding: 12px;overflow-y: auto;margin-bottom: 16px;background: #fafafa;}
+        .message-item {margin: 8px 0;line-height: 1.5;}
+        .msg-name {font-weight: bold;color: #4f46e5;margin-right: 6px;}
+        .send-box {display: flex;gap: 8px;}
+        #msgInput {flex: 1;padding: 10px;border: 1px solid #e5e7eb;border-radius: 6px;font-size: 15px;}
+        .tip-text {color: #6b7280;font-size: 13px;margin-top: 8px;}
     </style>
 </head>
 <body>
@@ -116,26 +42,19 @@
     </div>
 
     <script>
-        // =========【此处修改为你的Render wss地址！！】========
-        const WS_URL = "chat-ws-backend-production-4212.up.railway.app";
-        // =====================================================
+        // ✅自动同源wss，部署完成无需修改任何地址！
+        const origin = window.location.origin;
+        const WS_URL = origin.replace("https://","wss://");
 
         const urlParams = new URLSearchParams(window.location.search);
         let roomId = urlParams.get('room');
-        // 生成4位数字房间ID
-        if (!roomId) {
-            roomId = String(Math.floor(Math.random() * 9000) + 1000);
-            window.location.search = `room=${roomId}`;
-        }
-        // 简单校验，防止非法room参数
-        if (!/^\d{4}$/.test(roomId)) {
+        if (!roomId || !/^\d{4}$/.test(roomId)) {
             roomId = String(Math.floor(Math.random() * 9000) + 1000);
             window.location.search = `room=${roomId}`;
         }
 
         const roomUrlInput = document.getElementById('roomUrl');
         roomUrlInput.value = window.location.href;
-
         document.getElementById('copyBtn').addEventListener('click', async () => {
             await navigator.clipboard.writeText(roomUrlInput.value);
             alert('房间链接已复制！');
@@ -149,11 +68,17 @@
 
         let userName = '';
         let ws = null;
+        let reconnectTimer = null;
 
+        // 断线自动重连函数
         function connectWS() {
             ws = new WebSocket(WS_URL);
             ws.onopen = () => {
                 console.log("WebSocket连接成功");
+                clearTimeout(reconnectTimer);
+                if(userName){
+                    ws.send(JSON.stringify({action:"join",roomId:roomId,nick:userName}));
+                }
             };
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
@@ -164,7 +89,8 @@
                 }
             };
             ws.onclose = () => {
-                addSystemMsg("与服务器断开连接");
+                addSystemMsg("与服务器断开连接，尝试重连...");
+                reconnectTimer = setTimeout(connectWS,3000);
             };
             ws.onerror = (err) => {
                 console.error("连接错误", err);
@@ -178,11 +104,7 @@
             const nick = nickInput.value.trim();
             if (!nick) return alert('请输入有效昵称');
             userName = nick;
-            ws.send(JSON.stringify({
-                action: "join",
-                roomId: roomId,
-                nick: userName
-            }));
+            ws.send(JSON.stringify({action: "join",roomId: roomId,nick: userName}));
             msgInput.disabled = false;
             sendBtn.disabled = false;
             nickInput.disabled = true;
@@ -194,10 +116,7 @@
         function sendMessage() {
             const text = msgInput.value.trim();
             if (!text || !userName) return;
-            ws.send(JSON.stringify({
-                action: "chat",
-                text: text
-            }));
+            ws.send(JSON.stringify({action: "chat",text: text}));
             msgInput.value = '';
         }
 
@@ -212,7 +131,6 @@
             chatBox.appendChild(div);
             chatBox.scrollTop = chatBox.scrollHeight;
         }
-
         function addSystemMsg(text) {
             renderMessage({ type: 'system', text });
         }
